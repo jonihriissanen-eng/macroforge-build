@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
@@ -54,14 +53,13 @@ public sealed class MainForm : Form
     private readonly Stopwatch recordClock = new();
     private readonly List<MacroEvent> events = [];
     private readonly List<Control> automationControls = [];
-    private readonly System.Windows.Forms.Timer gameTimer = new() { Interval = 750 };
     private readonly object stateLock = new();
 
     private IntPtr keyboardHook, mouseHook;
     private HookProc? keyboardProc, mouseProc;
     private CancellationTokenSource? actionCts;
     private Keys? heldKey;
-    private bool recording, gameLocked, closing;
+    private bool recording;
     private long lastMoveMs;
     private Point lastMove;
 
@@ -91,9 +89,7 @@ public sealed class MainForm : Form
         Font = new Font("Segoe UI", 10);
         BuildUi();
         RefreshMacros();
-        gameTimer.Tick += (_, _) => CheckGameSafety();
-        gameTimer.Start();
-        Shown += (_, _) => { CheckGameSafety(); if (!gameLocked) RegisterHotkeys(); };
+        Shown += (_, _) => RegisterHotkeys();
         FormClosing += (_, _) => Shutdown();
     }
 
@@ -114,9 +110,9 @@ public sealed class MainForm : Form
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         };
         var recorder = MakeTab("Macro Recorder");
-var clicker = MakeTab("Auto Clicker");
-var holder = MakeTab("Key Holder");
-var info = MakeTab("Safety & Hotkeys");
+        var clicker = MakeTab("Auto Clicker");
+        var holder = MakeTab("Key Holder");
+        var info = MakeTab("Hotkeys");
         BuildRecorder(recorder); BuildClicker(clicker); BuildHolder(holder); BuildInfo(info);
         tabs.TabPages.AddRange([recorder, clicker, holder, info]);
         var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 0, 24, 22), BackColor = BackColor };
@@ -169,8 +165,8 @@ var info = MakeTab("Safety & Hotkeys");
 
     private void BuildInfo(TabPage tab)
     {
-        var card = MakeCard(); tab.Controls.Add(card); AddHeading(card, "Safety and global hotkeys", "Hotkeys work when MacroForge is not focused.");
-        var text = MakeLabel("F6   Start auto clicker\r\nF7   Hold selected key\r\nF8   Start recording\r\nF9   Stop recording and save\r\nF10  Play selected macro\r\nF12  Emergency stop and release keys\r\n\r\nGAME SAFE MODE\r\nWhen Rocket League, Fortnite, or VALORANT is detected, MacroForge stops all actions, releases keys, removes input hooks and unregisters hotkeys until the game closes. It does not inject code, inspect game memory, modify game files, or bypass anti-cheat.", 11, false, Color.Gainsboro);
+        var card = MakeCard(); tab.Controls.Add(card); AddHeading(card, "Global hotkeys", "Hotkeys work when MacroForge is not focused.");
+        var text = MakeLabel("F6   Start auto clicker\r\nF7   Hold selected key\r\nF8   Start recording\r\nF9   Stop recording and save\r\nF10  Play selected macro\r\nF12  Emergency stop and release keys", 11, false, Color.Gainsboro);
         text.Location = new Point(22, 95); text.Size = new Size(820, 360); card.Controls.Add(text);
     }
 
@@ -215,7 +211,7 @@ var info = MakeTab("Safety & Hotkeys");
             }, token);
         }
         catch (OperationCanceledException) { }
-        finally { actionCts?.Dispose(); actionCts = null; ToggleAutomation(!gameLocked); ShowIdleStatus(); }
+        finally { actionCts?.Dispose(); actionCts = null; ToggleAutomation(true); ShowIdleStatus(); }
     }
 
     private async void StartAutoClicker()
@@ -226,7 +222,7 @@ var info = MakeTab("Safety & Hotkeys");
         var done = 0;
         try { await Task.Run(async () => { while (!token.IsCancellationRequested && (count == 0 || done < count)) { ClickMouse(button); done++; await Task.Delay(interval, token); } }, token); }
         catch (OperationCanceledException) { }
-        finally { clickStatus.Text = $"Stopped ({done} clicks)"; actionCts?.Dispose(); actionCts = null; ToggleAutomation(!gameLocked); ShowIdleStatus(); }
+        finally { clickStatus.Text = $"Stopped ({done} clicks)"; actionCts?.Dispose(); actionCts = null; ToggleAutomation(true); ShowIdleStatus(); }
     }
 
     private void StartKeyHold()
@@ -238,7 +234,6 @@ var info = MakeTab("Safety & Hotkeys");
 
     private bool CanStart()
     {
-        if (gameLocked) { MessageBox.Show("Game Safe Mode is active. Automation is disabled while a protected game is running.", "MacroForge"); return false; }
         if (recording || actionCts is not null || heldKey is not null) { MessageBox.Show("Stop the current action first.", "MacroForge"); return false; }
         return true;
     }
@@ -249,16 +244,6 @@ var info = MakeTab("Safety & Hotkeys");
         if (recording) StopRecording();
         if (heldKey is Keys key) { SendKey((ushort)key, false); heldKey = null; keyStatus.Text = "Released"; }
         ShowIdleStatus();
-    }
-
-    private void CheckGameSafety()
-    {
-        if (closing) return;
-        var detected = Process.GetProcesses().Any(p => { try { var n = p.ProcessName; return n.Equals("RocketLeague", StringComparison.OrdinalIgnoreCase) || n.StartsWith("FortniteClient", StringComparison.OrdinalIgnoreCase) || n.StartsWith("VALORANT-Win64-Shipping", StringComparison.OrdinalIgnoreCase); } catch { return false; } });
-        if (detected == gameLocked) return;
-        gameLocked = detected;
-        if (detected) { StopAll(); RemoveHooks(); UnregisterHotkeys(); ToggleAutomation(false); SetStatus("GAME SAFE MODE — AUTOMATION OFF", Color.FromArgb(255, 204, 102)); recordStatus.Text = clickStatus.Text = keyStatus.Text = "Locked while game is open"; }
-        else { ToggleAutomation(true); RegisterHotkeys(); recordStatus.Text = $"{events.Count} events"; clickStatus.Text = keyStatus.Text = "Ready"; SetStatus("READY", Color.FromArgb(116, 224, 148)); }
     }
 
     private void InstallHooks()
@@ -348,9 +333,9 @@ var info = MakeTab("Safety & Hotkeys");
     private static string SafeName(string value) { var bad = Path.GetInvalidFileNameChars(); var result = new string(value.Trim().Where(c => !bad.Contains(c)).ToArray()); return string.IsNullOrWhiteSpace(result) ? "Untitled Macro" : result[..Math.Min(80, result.Length)]; }
     private static bool TryParseKey(string text, out Keys key) { var aliases = new Dictionary<string, Keys>(StringComparer.OrdinalIgnoreCase) { ["CTRL"] = Keys.ControlKey, ["CONTROL"] = Keys.ControlKey, ["SHIFT"] = Keys.ShiftKey, ["ALT"] = Keys.Menu, ["SPACE"] = Keys.Space, ["ENTER"] = Keys.Enter, ["TAB"] = Keys.Tab, ["ESC"] = Keys.Escape }; return aliases.TryGetValue(text.Trim(), out key) || Enum.TryParse(text.Trim(), true, out key); }
     private void ToggleAutomation(bool enabled, bool keepStopButtons = false) { foreach (var c in automationControls) { if (keepStopButtons && Equals(c.Tag, "stop")) continue; c.Enabled = enabled; } }
-    private void ShowIdleStatus() { if (gameLocked) SetStatus("GAME SAFE MODE — AUTOMATION OFF", Color.FromArgb(255, 204, 102)); else SetStatus("READY", Color.FromArgb(116, 224, 148)); }
+    private void ShowIdleStatus() { SetStatus("READY", Color.FromArgb(116, 224, 148)); }
     private void SetStatus(string text, Color color) { globalStatus.Text = text; globalStatus.ForeColor = color; }
-    private void Shutdown() { closing = true; gameTimer.Stop(); StopAll(); RemoveHooks(); UnregisterHotkeys(); }
+    private void Shutdown() { StopAll(); RemoveHooks(); UnregisterHotkeys(); }
 
     private static TabPage MakeTab(string text) => new(text) { BackColor = Color.FromArgb(11, 11, 14), Padding = new Padding(10) };
     private static Panel MakeCard() => new() { Dock = DockStyle.Fill, Margin = new Padding(0, 14, 0, 0), Padding = new Padding(18), BackColor = Color.FromArgb(22, 22, 27) };
