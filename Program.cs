@@ -113,7 +113,10 @@ public sealed class MainForm : Form
             TextRenderer.DrawText(e.Graphics, tabs.TabPages[e.Index].Text, Font, e.Bounds, selected ? Color.White : Color.Silver,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         };
-        var recorder = MakeTab("Macro Recorder"), clicker = MakeTab("Auto Clicker"), holder = MakeTab("Key Holder"), info = MakeTab("Safety & Hotkeys");
+        var recorder = MakeTab("Macro Recorder");
+var clicker = MakeTab("Auto Clicker");
+var holder = MakeTab("Key Holder");
+var info = MakeTab("Safety & Hotkeys");
         BuildRecorder(recorder); BuildClicker(clicker); BuildHolder(holder); BuildInfo(info);
         tabs.TabPages.AddRange([recorder, clicker, holder, info]);
         var container = new Panel { Dock = DockStyle.Fill, Padding = new Padding(24, 0, 24, 22), BackColor = BackColor };
